@@ -1,0 +1,105 @@
+---
+title: "Cheonan Parking Dashboard"
+format:
+  html:
+    toc: true
+    theme: cosmo
+    code-fold: false
+jupyter: python3
+execute:
+  echo: true
+  warning: false
+  message: false
+---
+
+## Overview
+
+This page renders an interactive Plotly chart for parking capacity bands (총면수 구간).
+
+::: callout-tip
+If your data isn’t ready, the code below can generate example data.
+:::
+
+```{python}
+import pandas as pd
+import plotly.express as px
+from pathlib import Path
+
+# -----------------------------------
+# 1) 데이터 로드 경로 설정
+#    (표준화된 파일명 → 우선 시도 / 아니라면 한글 파일명 → 대안 시도)
+# -----------------------------------
+root = Path(".")
+standard_path = root / "data" / "public_parking_locations_2024.csv"
+korean_path   = root / "data" / "천안도시공사_주차장 현황_20250716 (2).csv"
+
+df = None
+if standard_path.exists():
+    # 표준화된 파일명 (일반적으로 UTF-8)
+    try:
+        df = pd.read_csv(standard_path)
+    except UnicodeDecodeError:
+        df = pd.read_csv(standard_path, encoding="cp949")
+elif korean_path.exists():
+    # 한글 파일명 (대개 cp949 필요)
+    try:
+        df = pd.read_csv(korean_path, encoding="cp949")
+    except UnicodeDecodeError:
+        df = pd.read_csv(korean_path)  # 혹시 UTF-8이면 이 경로로
+else:
+    # -----------------------------------
+    # 2) 데이터가 아직 없다면 예시 데이터 생성
+    # -----------------------------------
+    import numpy as np
+    rng = np.random.default_rng(42)
+    df = pd.DataFrame({
+        "시설명": [f"공영주차장-{i:03d}" for i in range(1, 151)],
+        "총면수": rng.integers(10, 300, size=150)
+    })
+
+# -----------------------------------
+# 3) 전처리: '총면수' 숫자화 + 구간화
+# -----------------------------------
+# (문자/콤마 제거 대비)
+df["총면수"] = (
+    df["총면수"]
+      .astype(str)
+      .str.replace(",", "", regex=False)
+      .str.extract(r"(\d+)", expand=False)
+)
+df["총면수"] = pd.to_numeric(df["총면수"], errors="coerce")
+
+# 유효 데이터만
+df = df.dropna(subset=["총면수"])
+
+# 구간(bin) 설정: 0~50, 51~100, 101+
+bins = [0, 50, 100, df["총면수"].max()]
+labels = ["0~50", "51~100", "101+"]
+
+# right=True: 우측 경계 포함 (50, 100 포함)
+df["총면수_구간"] = pd.cut(df["총면수"], bins=bins, labels=labels, right=True, include_lowest=True)
+
+# 구간별 개수 집계
+count_by_bin = (
+    df["총면수_구간"]
+    .value_counts()
+    .rename_axis("구간")
+    .reset_index(name="주차장수")
+    .sort_values("구간")
+)
+
+count_by_bin
+
+
+fig = px.bar(
+    count_by_bin,
+    x="구간",
+    y="주차장수",
+    text="주차장수",
+    color="구간",
+    title="총면수 구간별 주차장 수"
+)
+fig.update_traces(textposition="outside")
+fig.update_layout(yaxis_title="주차장 수", xaxis_title="총면수 구간", bargap=0.2)
+fig
+
